@@ -1,7 +1,5 @@
 import { AuthTokensResponse, AuthUser, LoginPayload } from '../types/auth';
-
-const rawBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '');
-const API_BASE = rawBase.endsWith('/v1') ? rawBase.slice(0, -3) : rawBase;
+import { API_BASE } from './authFetch';
 
 export const authApi = {
   /**

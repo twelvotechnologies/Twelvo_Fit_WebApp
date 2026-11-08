@@ -1,6 +1,5 @@
 import { useAuthStore } from '../stores/useAuthStore';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+import { API_BASE } from './authFetch';
 
 export interface TrainerItem {
   id: string;

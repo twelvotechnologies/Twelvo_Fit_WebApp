@@ -1,7 +1,17 @@
 import { useAuthStore } from '../stores/useAuthStore';
 
-const rawBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '');
-export const API_BASE = rawBase.endsWith('/v1') ? rawBase.slice(0, -3) : rawBase;
+const getNormalizedApiBase = (): string => {
+  let base = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '');
+  if (base.endsWith('/v1')) {
+    base = base.slice(0, -3).replace(/\/+$/, '');
+  }
+  if (!base.endsWith('/api')) {
+    base = `${base}/api`;
+  }
+  return base;
+};
+
+export const API_BASE = getNormalizedApiBase();
 
 /**
  * Shared authenticated fetch helper for all API modules:

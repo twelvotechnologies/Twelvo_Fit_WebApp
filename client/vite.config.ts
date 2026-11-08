@@ -10,8 +10,9 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'https://twelvo-fit-webapp.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
     },
   },

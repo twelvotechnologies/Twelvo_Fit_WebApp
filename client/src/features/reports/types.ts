@@ -1,4 +1,4 @@
-export type DateRangeOption = 'TODAY' | '7D' | '30D' | '90D' | 'YTD' | '1Y' | 'ALL';
+export type DateRangeOption = 'TODAY' | '7D' | '30D' | '90D' | 'YTD' | '1Y' | 'ALL' | 'CUSTOM';
 
 export type ReportTab = 'pnl' | 'expenses' | 'fees' | 'members' | 'attendance';
 

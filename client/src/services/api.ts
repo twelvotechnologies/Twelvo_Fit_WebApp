@@ -1,6 +1,5 @@
 import { IApiResponse, IHealthStatus, IMember, CreateMemberDTO } from '../types';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+import { API_BASE } from '../api/authFetch';
 
 export interface HealthCheckResult {
   data: IHealthStatus | null;
@@ -13,7 +12,7 @@ export const api = {
   async checkHealth(): Promise<HealthCheckResult> {
     const start = performance.now();
     try {
-      const res = await fetch(`${API_BASE}/health`, { cache: 'no-store' });
+      const res = await fetch(`${API_BASE}/v1/health`, { cache: 'no-store' });
       const latencyMs = Math.round(performance.now() - start);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);

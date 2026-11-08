@@ -1,6 +1,7 @@
 import React from 'react';
 import { BookOpen, Dumbbell, RefreshCw } from 'lucide-react';
 import { HealthCheckResult } from '../services/api';
+import { API_BASE } from '../api/authFetch';
 
 interface NavbarProps {
   health: HealthCheckResult;
@@ -8,6 +9,9 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ health, onRefreshHealth }) => {
+  const swaggerDocsUrl = API_BASE.startsWith('http')
+    ? `${API_BASE.replace(/\/api\/?$/, '')}/api-docs`
+    : 'https://twelvo-fit-webapp.onrender.com/api-docs';
   return (
     <nav className="glass-panel navbar" id="main-navbar">
       <div className="brand-section">
@@ -52,7 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({ health, onRefreshHealth }) => {
 
         {/* Swagger Docs Link */}
         <a
-          href="http://localhost:3000/api-docs"
+          href={swaggerDocsUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="swagger-btn"

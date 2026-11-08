@@ -9,6 +9,8 @@ import {
   Printer,
   Loader2,
   RefreshCw,
+  Calendar,
+  RotateCcw,
 } from 'lucide-react';
 import { getReceipts, type ReceiptItem } from '../../api/receiptsApi';
 import { getMembers, type MemberRecord } from '../../api/membersApi';
@@ -56,13 +58,110 @@ const PAYMENT_MODE_COLORS: Record<string, string> = {
 
 const PLAN_COLORS = ['#2563EB', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#64748B'];
 
+// Date range formatting & calculation helpers
+const formatYMD = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getPresetDates = (range: Exclude<DateRangeOption, 'CUSTOM'>): { from: string; to: string } => {
+  const now = new Date();
+  const todayStr = formatYMD(now);
+
+  if (range === 'TODAY') {
+    return { from: todayStr, to: todayStr };
+  }
+  if (range === '7D') {
+    const d = new Date();
+    d.setDate(now.getDate() - 7);
+    return { from: formatYMD(d), to: todayStr };
+  }
+  if (range === '30D') {
+    const d = new Date();
+    d.setDate(now.getDate() - 30);
+    return { from: formatYMD(d), to: todayStr };
+  }
+  if (range === '90D') {
+    const d = new Date();
+    d.setDate(now.getDate() - 90);
+    return { from: formatYMD(d), to: todayStr };
+  }
+  if (range === 'YTD') {
+    const d = new Date(now.getFullYear(), 0, 1);
+    return { from: formatYMD(d), to: todayStr };
+  }
+  if (range === '1Y') {
+    const d = new Date();
+    d.setFullYear(now.getFullYear() - 1);
+    return { from: formatYMD(d), to: todayStr };
+  }
+  // 'ALL'
+  return { from: '', to: '' };
+};
+
+const normalizeToYMD = (dateVal?: string | Date | null): string => {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string') {
+    const match = dateVal.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+  }
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '';
+  return formatYMD(d);
+};
+
+const formatDateDisplay = (dateStr: string): string => {
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (!y || !m || !d) return dateStr;
+    const date = new Date(y, m - 1, d);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
+
 export default function ReportsPage() {
+  const initialDates = useMemo(() => getPresetDates('30D'), []);
   const [activeTab, setActiveTab] = useState<ReportTab>('pnl');
   const [dateRange, setDateRange] = useState<DateRangeOption>('30D');
+  const [fromDate, setFromDate] = useState<string>(initialDates.from);
+  const [toDate, setToDate] = useState<string>(initialDates.to);
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const handlePresetClick = (range: Exclude<DateRangeOption, 'CUSTOM'>) => {
+    setDateRange(range);
+    const dates = getPresetDates(range);
+    setFromDate(dates.from);
+    setToDate(dates.to);
+  };
+
+  const handleCustomDateChange = (newFrom: string, newTo: string) => {
+    setFromDate(newFrom);
+    setToDate(newTo);
+    setDateRange('CUSTOM');
+  };
+
+  const handleResetFilters = () => {
+    handlePresetClick('30D');
+  };
+
+  // Check if a date falls inside the active [fromDate, toDate] interval
+  const isDateInRange = (dateVal?: string | Date | null): boolean => {
+    if (!fromDate && !toDate) return true;
+    const ymd = normalizeToYMD(dateVal);
+    if (!ymd) return true;
+    if (fromDate && ymd < fromDate) return false;
+    if (toDate && ymd > toDate) return false;
+    return true;
+  };
 
   // Load live data from receipts, members, and expenses APIs
   const loadData = async () => {
@@ -87,37 +186,16 @@ export default function ReportsPage() {
     loadData();
   }, []);
 
-  // Compute cutoff date for the selected date range
-  const dateRangeCutoff = useMemo(() => {
-    const now = new Date();
-    const cutoff = new Date();
-    if (dateRange === 'TODAY') {
-      cutoff.setHours(0, 0, 0, 0);
-      return cutoff;
-    }
-    if (dateRange === '7D') {
-      cutoff.setDate(now.getDate() - 7);
-      return cutoff;
-    }
-    if (dateRange === '30D') {
-      cutoff.setDate(now.getDate() - 30);
-      return cutoff;
-    }
-    if (dateRange === '90D') {
-      cutoff.setDate(now.getDate() - 90);
-      return cutoff;
-    }
-    if (dateRange === 'YTD') {
-      return new Date(now.getFullYear(), 0, 1);
-    }
-    if (dateRange === '1Y') {
-      cutoff.setFullYear(now.getFullYear() - 1);
-      return cutoff;
-    }
-    return new Date(0); // ALL
-  }, [dateRange]);
-
   const dateRangeLabel = useMemo(() => {
+    if (dateRange === 'CUSTOM') {
+      if (fromDate && toDate) {
+        if (fromDate === toDate) return formatDateDisplay(fromDate);
+        return `${formatDateDisplay(fromDate)} – ${formatDateDisplay(toDate)}`;
+      }
+      if (fromDate) return `From ${formatDateDisplay(fromDate)}`;
+      if (toDate) return `Up to ${formatDateDisplay(toDate)}`;
+      return 'All Time';
+    }
     switch (dateRange) {
       case 'TODAY':
         return 'Today';
@@ -132,29 +210,20 @@ export default function ReportsPage() {
       case '1Y':
         return 'Last 1 Year';
       case 'ALL':
+      default:
         return 'All Time';
     }
-  }, [dateRange]);
+  }, [dateRange, fromDate, toDate]);
 
   // Filtered receipts by date range
   const filteredReceipts = useMemo(() => {
-    if (dateRange === 'ALL') return receipts;
-    return receipts.filter((r) => {
-      if (!r.paymentDate) return true;
-      const d = new Date(r.paymentDate);
-      return isNaN(d.getTime()) || d >= dateRangeCutoff;
-    });
-  }, [receipts, dateRangeCutoff, dateRange]);
+    return receipts.filter((r) => isDateInRange(r.paymentDate));
+  }, [receipts, fromDate, toDate]);
 
   // Filtered expenses by date range
   const filteredExpenses = useMemo(() => {
-    if (dateRange === 'ALL') return expenses;
-    return expenses.filter((e) => {
-      if (!e.expenseDate) return true;
-      const d = new Date(e.expenseDate);
-      return isNaN(d.getTime()) || d >= dateRangeCutoff;
-    });
-  }, [expenses, dateRangeCutoff, dateRange]);
+    return expenses.filter((e) => isDateInRange(e.expenseDate));
+  }, [expenses, fromDate, toDate]);
 
   // Available unique membership plans
   const availablePlans = useMemo(() => {
@@ -322,12 +391,9 @@ export default function ReportsPage() {
         active += 1;
       }
 
-      // Check joining date within cutoff
-      if (m.joiningDate) {
-        const joinDate = new Date(m.joiningDate);
-        if (!isNaN(joinDate.getTime()) && joinDate >= dateRangeCutoff) {
-          newRegistrations += 1;
-        }
+      // Check joining date within date range
+      if (m.joiningDate && isDateInRange(m.joiningDate)) {
+        newRegistrations += 1;
       }
     });
 
@@ -343,7 +409,7 @@ export default function ReportsPage() {
       estimatedOverdueDues: Math.round(estimatedOverdueDues),
       retentionRate,
     };
-  }, [members, receipts, totalCollections, dateRangeCutoff]);
+  }, [members, receipts, totalCollections, fromDate, toDate]);
 
   // Collection efficiency: Realized / (Realized + Outstanding)
   const collectionEfficiency = useMemo(() => {
@@ -451,10 +517,14 @@ export default function ReportsPage() {
   const handleExportCSV = () => {
     let headers: string[] = [];
     let rows: (string | number)[][] = [];
-    let filename = `GymERP_Report_${activeTab}_${dateRange}.csv`;
+    const rangeSlug =
+      dateRange === 'CUSTOM'
+        ? `${fromDate || 'start'}_to_${toDate || 'end'}`
+        : dateRange;
+    let filename = `GymERP_Report_${activeTab}_${rangeSlug}.csv`;
 
     if (activeTab === 'pnl') {
-      filename = `GymERP_PnL_Statement_${dateRange}.csv`;
+      filename = `GymERP_PnL_Statement_${rangeSlug}.csv`;
       headers = [
         'Month',
         'Collections (INR)',
@@ -474,7 +544,7 @@ export default function ReportsPage() {
         `${r.marginPercent}%`,
       ]);
     } else if (activeTab === 'expenses') {
-      filename = `GymERP_Expense_Vouchers_${dateRange}.csv`;
+      filename = `GymERP_Expense_Vouchers_${rangeSlug}.csv`;
       headers = [
         'Voucher Code',
         'Date',
@@ -496,7 +566,7 @@ export default function ReportsPage() {
         e.amount,
       ]);
     } else if (activeTab === 'fees') {
-      filename = `GymERP_Fee_Receipts_${dateRange}.csv`;
+      filename = `GymERP_Fee_Receipts_${rangeSlug}.csv`;
       headers = [
         'Receipt Ref',
         'Date',
@@ -520,7 +590,7 @@ export default function ReportsPage() {
         r.status || 'PAID',
       ]);
     } else if (activeTab === 'members') {
-      filename = `GymERP_Members_Dues_${dateRange}.csv`;
+      filename = `GymERP_Members_Dues_${rangeSlug}.csv`;
       headers = [
         'Member Name',
         'Phone',
@@ -542,7 +612,7 @@ export default function ReportsPage() {
         m.paymentStatus || 'PAID_UP',
       ]);
     } else {
-      filename = `GymERP_Attendance_${dateRange}.csv`;
+      filename = `GymERP_Attendance_${rangeSlug}.csv`;
       headers = ['Slot Time', 'Average Check-ins', 'Wave Period'];
       rows = [
         ['06:00 AM', 14, 'Morning'],
@@ -608,25 +678,8 @@ export default function ReportsPage() {
           </p>
         </div>
 
-        {/* Global Date Range & Action Buttons */}
+        {/* Global Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Date Range Selector */}
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600">
-            {(['7D', '30D', '90D', 'YTD', '1Y', 'ALL'] as const).map((range) => (
-              <button
-                key={range}
-                onClick={() => setDateRange(range)}
-                className={`px-3 py-1 rounded-lg transition-all ${
-                  dateRange === range
-                    ? 'bg-white text-blue-600 shadow-xs'
-                    : 'hover:text-slate-900'
-                }`}
-              >
-                {range}
-              </button>
-            ))}
-          </div>
-
           {/* Export CSV Button */}
           <button
             onClick={handleExportCSV}
@@ -654,6 +707,85 @@ export default function ReportsPage() {
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
+        </div>
+      </div>
+
+      {/* Date Range & Custom Date Filters Card */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3.5">
+        {/* Preset Range Options */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mr-1">
+            <Calendar className="w-3.5 h-3.5 text-blue-600" />
+            <span>Range:</span>
+          </div>
+          <div className="flex flex-wrap bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 gap-0.5">
+            {(['TODAY', '7D', '30D', '90D', 'YTD', '1Y', 'ALL'] as const).map((range) => (
+              <button
+                key={range}
+                type="button"
+                onClick={() => handlePresetClick(range)}
+                className={`px-3 py-1 rounded-lg transition-all ${
+                  dateRange === range
+                    ? 'bg-white text-blue-600 shadow-xs font-bold'
+                    : 'hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                {range === 'TODAY' ? 'Today' : range === 'ALL' ? 'All' : range}
+              </button>
+            ))}
+            {dateRange === 'CUSTOM' && (
+              <span className="px-3 py-1 rounded-lg bg-blue-50 text-blue-700 font-bold border border-blue-200/60 shadow-xs">
+                Custom
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* From Date & To Date Inputs */}
+        <div className="flex flex-wrap items-center gap-2.5 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+          <div className="flex items-center gap-1.5 text-xs bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:bg-white transition-all">
+            <label htmlFor="report-from-date" className="font-bold text-slate-500 text-[11px] uppercase tracking-wider">
+              From:
+            </label>
+            <input
+              id="report-from-date"
+              type="date"
+              value={fromDate}
+              max={toDate || undefined}
+              onChange={(e) => handleCustomDateChange(e.target.value, toDate)}
+              className="bg-transparent text-xs font-medium text-slate-800 focus:outline-none cursor-pointer"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:bg-white transition-all">
+            <label htmlFor="report-to-date" className="font-bold text-slate-500 text-[11px] uppercase tracking-wider">
+              To:
+            </label>
+            <input
+              id="report-to-date"
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              onChange={(e) => handleCustomDateChange(fromDate, e.target.value)}
+              className="bg-transparent text-xs font-medium text-slate-800 focus:outline-none cursor-pointer"
+            />
+          </div>
+
+          {(dateRange === 'CUSTOM' || fromDate !== initialDates.from || toDate !== initialDates.to) && (
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Reset to 30 Days preset"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset</span>
+            </button>
+          )}
+
+          <div className="text-[11px] text-slate-400 font-medium pl-1 hidden sm:block">
+            Showing: <span className="font-semibold text-slate-700">{dateRangeLabel}</span>
+          </div>
         </div>
       </div>
 
