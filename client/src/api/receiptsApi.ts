@@ -33,6 +33,8 @@ export interface SubmitReceiptInput {
   planDurationUnit?: string;
   planDurationValue?: number;
   amount: number;
+  taxAmount?: number;
+  total?: number;
   paymentMode: 'UPI' | 'Card' | 'Bank Transfer' | 'Cash';
   paymentDate: string;
   referenceNo?: string;
@@ -139,6 +141,7 @@ export const submitReceipt = async (
         planDurationUnit: input.planDurationUnit,
         planDurationValue: input.planDurationValue,
         amount: input.amount,
+        taxAmount: input.taxAmount !== undefined ? input.taxAmount : 0,
         paymentMode: input.paymentMode,
         paymentDate: input.paymentDate,
         referenceNo: input.referenceNo,
@@ -162,8 +165,8 @@ export const submitReceipt = async (
 
   // Offline / local fallback
   const baseAmount = Number(input.amount) || 0;
-  const tax = Math.round(baseAmount * 0.18);
-  const total = baseAmount + tax;
+  const tax = input.taxAmount !== undefined ? Number(input.taxAmount) : 0;
+  const total = input.total !== undefined ? Number(input.total) : baseAmount + tax;
   const dateStr = input.paymentDate || new Date().toISOString().split('T')[0];
   const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 

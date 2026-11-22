@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
+  UserPlus,
   Receipt,
   Users,
   Dumbbell,
@@ -30,6 +31,7 @@ interface NavItemConfig {
 
 const NAV_ITEMS: NavItemConfig[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['gym_owner', 'super_admin'] },
+  { to: '/registration', label: 'Registration', icon: UserPlus, roles: ['gym_owner', 'trainer', 'super_admin'] },
   { to: '/receipts', label: 'Receipts', icon: Receipt, roles: ['gym_owner', 'trainer', 'super_admin'] },
   { to: '/members', label: 'Member Management', icon: Users, roles: ['gym_owner', 'trainer', 'super_admin'] },
   { to: '/trainers', label: 'Trainers', icon: Dumbbell, roles: ['gym_owner', 'super_admin'] },

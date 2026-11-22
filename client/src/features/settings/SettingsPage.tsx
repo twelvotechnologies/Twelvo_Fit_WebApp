@@ -13,6 +13,10 @@ import {
   Trash2,
   QrCode,
   ReceiptText,
+  Sliders,
+  Check,
+  Percent,
+  CheckCircle2,
 } from 'lucide-react';
 import ExpenseTypesTab from './ExpenseTypesTab';
 import { useAuthStore } from '../../stores/useAuthStore';
@@ -32,6 +36,9 @@ import {
   updatePlanType,
   togglePlanTypeStatus,
   deletePlanType,
+  getGymConfiguration,
+  updateGymConfiguration,
+  DEFAULT_GYM_CONFIG,
   CreateBankAccountInput,
   CreatePlanTypeInput,
 } from '../../api/settingsApi';
@@ -40,14 +47,20 @@ import {
   BankAccountItem,
   PlanTypeItem,
   DurationUnit,
+  GymConfigSettings,
 } from '../../api/types';
 
-type SettingsTab = 'PAYMENT_TYPES' | 'BANKS' | 'PLAN_TYPES' | 'EXPENSE_TYPES';
+type SettingsTab = 'CONFIGURATIONS' | 'PLAN_TYPES' | 'PAYMENT_TYPES' | 'BANKS' | 'EXPENSE_TYPES';
 
 function SettingsPage() {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('PAYMENT_TYPES');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('CONFIGURATIONS');
   const [loading, setLoading] = useState(true);
+
+  // Section 0: System & GST Configurations State
+  const [gymConfig, setGymConfig] = useState<GymConfigSettings>(DEFAULT_GYM_CONFIG);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configSuccessMsg, setConfigSuccessMsg] = useState('');
 
   // Section 1: Payment Types State
   const [paymentTypes, setPaymentTypes] = useState<PaymentTypeItem[]>([]);
@@ -80,20 +93,26 @@ function SettingsPage() {
     durationValue: 1,
     durationUnit: 'Months',
     standardFee: 2500,
+    hasGst: true,
+    gstRate: 18,
   });
 
   // Initial Data Load
   const fetchAllSettings = async () => {
     try {
       setLoading(true);
-      const [pt, bnk, plans] = await Promise.all([
+      const [pt, bnk, plans, cfg] = await Promise.all([
         getPaymentTypes(),
         getBankAccounts(),
         getPlanTypes(),
+        getGymConfiguration(),
       ]);
       setPaymentTypes(pt);
       setBanks(bnk);
       setPlanTypes(plans);
+      if (cfg) {
+        setGymConfig(cfg);
+      }
     } catch (err) {
       console.error('Failed to load settings data', err);
     } finally {
@@ -104,6 +123,23 @@ function SettingsPage() {
   useEffect(() => {
     fetchAllSettings();
   }, []);
+
+  // --- Gym Configurations Actions ---
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setConfigSaving(true);
+      setConfigSuccessMsg('');
+      const updated = await updateGymConfiguration(gymConfig);
+      setGymConfig(updated);
+      setConfigSuccessMsg('Gym and GST configurations saved successfully!');
+      setTimeout(() => setConfigSuccessMsg(''), 4000);
+    } catch (err) {
+      alert('Failed to save configuration settings');
+    } finally {
+      setConfigSaving(false);
+    }
+  };
 
   // --- Payment Types Actions ---
   const handleSavePaymentType = async (e: React.FormEvent) => {
@@ -238,6 +274,11 @@ function SettingsPage() {
     e.preventDefault();
     if (!planForm.name.trim()) return;
 
+    const hasGst = planForm.hasGst !== undefined ? planForm.hasGst : true;
+    const gstRate = hasGst ? (planForm.gstRate !== undefined ? planForm.gstRate : (gymConfig.defaultGstRate || 18)) : 0;
+    const standardFee = Number(planForm.standardFee) || 2500;
+    const totalWithGst = hasGst ? standardFee + Math.round(standardFee * (gstRate / 100)) : standardFee;
+
     try {
       if (editingPlan) {
         setPlanTypes((prev) =>
@@ -249,7 +290,10 @@ function SettingsPage() {
                   category: planForm.category || 'Regular',
                   durationUnit: planForm.durationUnit,
                   durationValue: planForm.durationUnit === 'One-time' ? 0 : planForm.durationValue,
-                  standardFee: Number(planForm.standardFee) || 2500,
+                  standardFee,
+                  hasGst,
+                  gstRate,
+                  totalWithGst,
                   displayDuration:
                     planForm.durationUnit === 'One-time'
                       ? 'One-time'
@@ -258,14 +302,32 @@ function SettingsPage() {
               : p
           )
         );
-        await updatePlanType(editingPlan.id, planForm);
+        await updatePlanType(editingPlan.id, {
+          ...planForm,
+          standardFee,
+          hasGst,
+          gstRate,
+        });
       } else {
-        const created = await addPlanType(planForm);
+        const created = await addPlanType({
+          ...planForm,
+          standardFee,
+          hasGst,
+          gstRate,
+        });
         setPlanTypes((prev) => [...prev, created]);
       }
       setIsAddPlanModalOpen(false);
       setEditingPlan(null);
-      setPlanForm({ name: '', category: 'Regular', durationValue: 1, durationUnit: 'Months', standardFee: 2500 });
+      setPlanForm({
+        name: '',
+        category: 'Regular',
+        durationValue: 1,
+        durationUnit: 'Months',
+        standardFee: 2500,
+        hasGst: gymConfig.gstEnabled,
+        gstRate: gymConfig.defaultGstRate || 18,
+      });
     } catch (err) {
       alert('Error saving plan type');
       fetchAllSettings();
@@ -331,6 +393,52 @@ function SettingsPage() {
         {/* Left Sub-Navigation */}
         <div className="md:col-span-4 lg:col-span-3 bg-white border border-[#E2E6ED] rounded-xl p-2 shadow-subtle space-y-1">
           <button
+            onClick={() => setActiveTab('CONFIGURATIONS')}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${
+              activeTab === 'CONFIGURATIONS'
+                ? 'bg-[#E8EFFE] text-[#2F6FED] font-semibold'
+                : 'text-[#1A2333] hover:bg-[#F5F7FA]'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Sliders className="w-4 h-4 text-[#2F6FED]" strokeWidth={1.8} />
+              <span>Configurations</span>
+            </div>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                gymConfig.gstEnabled
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-[#F5F7FA] text-[#6B7686]'
+              }`}
+            >
+              {gymConfig.gstEnabled ? 'GST: ON' : 'GST: OFF'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('PLAN_TYPES')}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${
+              activeTab === 'PLAN_TYPES'
+                ? 'bg-[#E8EFFE] text-[#2F6FED] font-semibold'
+                : 'text-[#1A2333] hover:bg-[#F5F7FA]'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <CalendarCheck className="w-4 h-4 text-[#2F6FED]" strokeWidth={1.8} />
+              <span>Fee Types</span>
+            </div>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] tabular-nums font-bold ${
+                activeTab === 'PLAN_TYPES'
+                  ? 'bg-white text-[#2F6FED]'
+                  : 'bg-[#F5F7FA] text-[#6B7686]'
+              }`}
+            >
+              {planTypes.length}
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('PAYMENT_TYPES')}
             className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${
               activeTab === 'PAYMENT_TYPES'
@@ -377,29 +485,6 @@ function SettingsPage() {
           </button>
 
           <button
-            onClick={() => setActiveTab('PLAN_TYPES')}
-            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${
-              activeTab === 'PLAN_TYPES'
-                ? 'bg-[#E8EFFE] text-[#2F6FED] font-semibold'
-                : 'text-[#1A2333] hover:bg-[#F5F7FA]'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <CalendarCheck className="w-4 h-4 text-[#2F6FED]" strokeWidth={1.8} />
-              <span>Fee Types</span>
-            </div>
-            <span
-              className={`px-1.5 py-0.5 rounded text-[10px] tabular-nums font-bold ${
-                activeTab === 'PLAN_TYPES'
-                  ? 'bg-white text-[#2F6FED]'
-                  : 'bg-[#F5F7FA] text-[#6B7686]'
-              }`}
-            >
-              {planTypes.length}
-            </span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('EXPENSE_TYPES')}
             className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-colors ${
               activeTab === 'EXPENSE_TYPES'
@@ -434,6 +519,393 @@ function SettingsPage() {
             </div>
           ) : (
             <>
+              {/* SECTION 0: CONFIGURATIONS */}
+              {activeTab === 'CONFIGURATIONS' && (
+                <div className="space-y-6 animate-fade-in">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E6ED]">
+                    <div>
+                      <h2 className="font-heading text-lg font-bold text-[#1A2333]">
+                        Gym Configurations & GST Settings
+                      </h2>
+                      <p className="text-xs text-[#6B7686] mt-0.5">
+                        Configure Goods & Services Tax (GST) rules, tax exemption, business identity, and receipt invoicing
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+                          gymConfig.gstEnabled
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            gymConfig.gstEnabled ? 'bg-emerald-500' : 'bg-slate-400'
+                          }`}
+                        />
+                        {gymConfig.gstEnabled ? 'GST Enabled' : 'Tax Exempt (No GST)'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {configSuccessMsg && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2.5 text-xs text-emerald-800 animate-fade-in">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span className="font-medium">{configSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveConfig} className="space-y-6">
+                    {/* GST APPLICABILITY CARD */}
+                    <div className="bg-[#F8FAFC] border border-[#E2E6ED] rounded-xl p-5 space-y-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-[#1A2333] flex items-center gap-2">
+                          <Percent className="w-4 h-4 text-[#2F6FED]" />
+                          <span>Goods & Services Tax (GST) Policy</span>
+                        </h3>
+                        <p className="text-xs text-[#6B7686] mt-0.5">
+                          Specify whether your gym charges GST on member subscriptions and fees
+                        </p>
+                      </div>
+
+                      {/* GST Yes / No Segmented Selector */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setGymConfig({ ...gymConfig, gstEnabled: true })}
+                          className={`p-4 rounded-xl border-2 text-left transition-all ${
+                            gymConfig.gstEnabled
+                              ? 'border-[#2F6FED] bg-[#EEF4FF] shadow-xs'
+                              : 'border-[#E2E6ED] bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-[#1A2333]">Yes (With GST)</span>
+                            <div
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                gymConfig.gstEnabled
+                                  ? 'border-[#2F6FED] bg-[#2F6FED]'
+                                  : 'border-slate-300'
+                              }`}
+                            >
+                              {gymConfig.gstEnabled && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-[#6B7686] mt-1.5 leading-snug">
+                            Collect GST on fees and provide itemized tax invoices (CGST + SGST) for registered members.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setGymConfig({ ...gymConfig, gstEnabled: false })}
+                          className={`p-4 rounded-xl border-2 text-left transition-all ${
+                            !gymConfig.gstEnabled
+                              ? 'border-[#2F6FED] bg-[#EEF4FF] shadow-xs'
+                              : 'border-[#E2E6ED] bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-[#1A2333]">No (Without GST / Exempt)</span>
+                            <div
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                !gymConfig.gstEnabled
+                                  ? 'border-[#2F6FED] bg-[#2F6FED]'
+                                  : 'border-slate-300'
+                              }`}
+                            >
+                              {!gymConfig.gstEnabled && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-[#6B7686] mt-1.5 leading-snug">
+                            Exempt from GST (e.g. non-registered turnover or composite scheme). All fees display 0% tax.
+                          </p>
+                        </button>
+                      </div>
+
+                      {/* GST Options (When GST is enabled) */}
+                      {gymConfig.gstEnabled && (
+                        <div className="pt-3 border-t border-[#E2E6ED] space-y-4 animate-fade-in">
+                          {/* Rate selection */}
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1A2333] mb-1.5">
+                              Default GST Rate (%)
+                            </label>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {[18, 12, 5, 0].map((rate) => (
+                                <button
+                                  key={rate}
+                                  type="button"
+                                  onClick={() => setGymConfig({ ...gymConfig, defaultGstRate: rate })}
+                                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                                    gymConfig.defaultGstRate === rate
+                                      ? 'bg-[#2F6FED] text-white border-[#2F6FED]'
+                                      : 'bg-white text-[#1A2333] border-[#E2E6ED] hover:bg-[#F5F7FA]'
+                                  }`}
+                                >
+                                  {rate}% {rate === 18 && '(Standard Fitness)'}
+                                </button>
+                              ))}
+                              <div className="flex items-center gap-1.5 ml-2">
+                                <span className="text-xs text-[#6B7686]">Custom:</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  value={gymConfig.defaultGstRate}
+                                  onChange={(e) =>
+                                    setGymConfig({
+                                      ...gymConfig,
+                                      defaultGstRate: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-16 px-2 py-1 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] text-center font-bold"
+                                />
+                                <span className="text-xs text-[#6B7686]">%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Tax Calculation Mode: Exclusive vs Inclusive */}
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1A2333] mb-1.5">
+                              Tax Calculation Mode
+                            </label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <label
+                                className={`p-3 rounded-lg border cursor-pointer flex items-center justify-between text-xs transition-colors ${
+                                  gymConfig.taxCalculationType === 'EXCLUSIVE'
+                                    ? 'bg-white border-[#2F6FED] ring-1 ring-[#2F6FED]'
+                                    : 'bg-white border-[#E2E6ED] hover:bg-[#F5F7FA]'
+                                }`}
+                              >
+                                <div>
+                                  <div className="font-bold text-[#1A2333]">Exclusive (Recommended)</div>
+                                  <div className="text-[11px] text-[#6B7686]">
+                                    Base Fee + GST added on top (e.g. ₹2,500 + 18% = ₹2,950 total)
+                                  </div>
+                                </div>
+                                <input
+                                  type="radio"
+                                  name="taxMode"
+                                  checked={gymConfig.taxCalculationType === 'EXCLUSIVE'}
+                                  onChange={() =>
+                                    setGymConfig({ ...gymConfig, taxCalculationType: 'EXCLUSIVE' })
+                                  }
+                                  className="text-[#2F6FED]"
+                                />
+                              </label>
+
+                              <label
+                                className={`p-3 rounded-lg border cursor-pointer flex items-center justify-between text-xs transition-colors ${
+                                  gymConfig.taxCalculationType === 'INCLUSIVE'
+                                    ? 'bg-white border-[#2F6FED] ring-1 ring-[#2F6FED]'
+                                    : 'bg-white border-[#E2E6ED] hover:bg-[#F5F7FA]'
+                                }`}
+                              >
+                                <div>
+                                  <div className="font-bold text-[#1A2333]">Inclusive</div>
+                                  <div className="text-[11px] text-[#6B7686]">
+                                    Fee amount includes GST (e.g. ₹2,500 total, base is ₹2,119 + ₹381 tax)
+                                  </div>
+                                </div>
+                                <input
+                                  type="radio"
+                                  name="taxMode"
+                                  checked={gymConfig.taxCalculationType === 'INCLUSIVE'}
+                                  onChange={() =>
+                                    setGymConfig({ ...gymConfig, taxCalculationType: 'INCLUSIVE' })
+                                  }
+                                  className="text-[#2F6FED]"
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* GSTIN and PAN Numbers */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                            <div>
+                              <label className="block text-xs font-semibold text-[#1A2333] mb-1">
+                                GSTIN (15-digit GST Identification Number)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. 27AABCP1234F1Z8"
+                                maxLength={15}
+                                value={gymConfig.gstin || ''}
+                                onChange={(e) =>
+                                  setGymConfig({ ...gymConfig, gstin: e.target.value.toUpperCase() })
+                                }
+                                className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] font-mono uppercase"
+                              />
+                              <p className="text-[11px] text-[#6B7686] mt-0.5">
+                                Printed on official payment receipts, invoices, and WhatsApp shares.
+                              </p>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-[#1A2333] mb-1">
+                                Permanent Account Number (PAN)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. AABCP1234F"
+                                maxLength={10}
+                                value={gymConfig.panNumber || ''}
+                                onChange={(e) =>
+                                  setGymConfig({
+                                    ...gymConfig,
+                                    panNumber: e.target.value.toUpperCase(),
+                                  })
+                                }
+                                className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] font-mono uppercase"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* BUSINESS & INVOICING CARD */}
+                    <div className="bg-[#F8FAFC] border border-[#E2E6ED] rounded-xl p-5 space-y-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-[#1A2333] flex items-center gap-2">
+                          <Building2 className="w-4 h-4 text-[#2F6FED]" />
+                          <span>Legal Entity & Receipt Particulars</span>
+                        </h3>
+                        <p className="text-xs text-[#6B7686] mt-0.5">
+                          Information printed on official member tax invoices and WhatsApp receipts
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#1A2333] mb-1">
+                            Legal / Business Entity Name
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Twelvo Gym & Fitness Pvt Ltd"
+                            value={gymConfig.businessLegalName || ''}
+                            onChange={(e) =>
+                              setGymConfig({ ...gymConfig, businessLegalName: e.target.value })
+                            }
+                            className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-[#1A2333] mb-1">
+                            Receipt / Invoice Code Prefix
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. REC, INV, TW-"
+                            maxLength={8}
+                            value={gymConfig.invoicePrefix || ''}
+                            onChange={(e) =>
+                              setGymConfig({
+                                ...gymConfig,
+                                invoicePrefix: e.target.value.toUpperCase(),
+                              })
+                            }
+                            className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] font-mono uppercase"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* LIVE GST CALCULATION SIMULATOR */}
+                    <div className="p-4 bg-white border border-[#D5E3FF] rounded-xl space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#1A2333] flex items-center gap-1.5">
+                          <Sliders className="w-3.5 h-3.5 text-[#2F6FED]" />
+                          Live Tax Calculation Preview (Sample ₹2,500 Fee)
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            gymConfig.gstEnabled
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}
+                        >
+                          {gymConfig.gstEnabled
+                            ? `GST Active @ ${gymConfig.defaultGstRate || 18}% (${gymConfig.taxCalculationType})`
+                            : 'GST Inactive (0% / Exempt)'}
+                        </span>
+                      </div>
+
+                      {gymConfig.gstEnabled ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                          <div className="p-2.5 bg-[#F8FAFC] rounded-lg border border-[#E2E6ED]">
+                            <span className="text-[11px] text-[#6B7686] block">Base Fee</span>
+                            <span className="font-bold text-[#1A2333] tabular-nums">₹ 2,500</span>
+                          </div>
+                          <div className="p-2.5 bg-[#F8FAFC] rounded-lg border border-[#E2E6ED]">
+                            <span className="text-[11px] text-[#6B7686] block">
+                              CGST ({(gymConfig.defaultGstRate || 18) / 2}%)
+                            </span>
+                            <span className="font-bold text-[#1A2333] tabular-nums">
+                              ₹ {Math.round(2500 * (((gymConfig.defaultGstRate || 18) / 2) / 100))}
+                            </span>
+                          </div>
+                          <div className="p-2.5 bg-[#F8FAFC] rounded-lg border border-[#E2E6ED]">
+                            <span className="text-[11px] text-[#6B7686] block">
+                              SGST ({(gymConfig.defaultGstRate || 18) / 2}%)
+                            </span>
+                            <span className="font-bold text-[#1A2333] tabular-nums">
+                              ₹ {Math.round(2500 * (((gymConfig.defaultGstRate || 18) / 2) / 100))}
+                            </span>
+                          </div>
+                          <div className="p-2.5 bg-[#EEF4FF] rounded-lg border border-[#D5E3FF]">
+                            <span className="text-[11px] text-[#2F6FED] font-semibold block">Total Payable</span>
+                            <span className="font-extrabold text-[#2F6FED] tabular-nums text-sm">
+                              ₹{' '}
+                              {(
+                                2500 +
+                                Math.round(2500 * ((gymConfig.defaultGstRate || 18) / 100))
+                              ).toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs flex items-center justify-between">
+                          <span className="text-[#6B7686]">
+                            GST is disabled globally. All plans and receipts will show:
+                          </span>
+                          <span className="font-bold text-[#1A2333]">
+                            Base: ₹2,500 • GST: ₹0 (Exempt) • Net Total: ₹2,500
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* SAVE BUTTON */}
+                    <div className="flex items-center justify-end gap-3 pt-2">
+                      <button
+                        type="submit"
+                        disabled={configSaving}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-[#2F6FED] hover:bg-[#2558bf] text-white rounded-lg text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+                      >
+                        {configSaving ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving Configurations...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" />
+                            <span>Save Configurations</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
               {/* SECTION 1: PAYMENT TYPES */}
               {activeTab === 'PAYMENT_TYPES' && (
                 <div className="space-y-6 animate-fade-in">
@@ -731,17 +1203,25 @@ function SettingsPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E6ED]">
                     <div>
                       <h2 className="font-heading text-lg font-bold text-[#1A2333]">
-                        Fee Types
+                        Fee Types & Pricing
                       </h2>
                       <p className="text-xs text-[#6B7686] mt-0.5">
-                        Configure membership fee types, categories (Regular / Personal Training), and billing cycle durations
+                        Configure membership fee structures, GST calculation rules (With/Without GST), and duration tiers
                       </p>
                     </div>
 
                     <button
                       onClick={() => {
                         setEditingPlan(null);
-                        setPlanForm({ name: '', category: 'Regular', durationValue: 1, durationUnit: 'Months', standardFee: 2500 });
+                        setPlanForm({
+                          name: '',
+                          category: 'Regular',
+                          durationValue: 1,
+                          durationUnit: 'Months',
+                          standardFee: 2500,
+                          hasGst: gymConfig.gstEnabled,
+                          gstRate: gymConfig.defaultGstRate || 18,
+                        });
                         setIsAddPlanModalOpen(true);
                       }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#2F6FED] hover:bg-[#2558bf] text-white rounded-lg text-xs font-medium transition-colors shadow-sm self-start sm:self-auto"
@@ -759,103 +1239,133 @@ function SettingsPage() {
                           <th className="py-3 px-4">Fee Type Name</th>
                           <th className="py-3 px-4">Category</th>
                           <th className="py-3 px-4">Duration</th>
-                          <th className="py-3 px-4">Standard Fee</th>
+                          <th className="py-3 px-4">Base Fee</th>
+                          <th className="py-3 px-4">GST Option</th>
+                          <th className="py-3 px-4">Total Amount</th>
                           <th className="py-3 px-4">Status</th>
                           <th className="py-3 px-4 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#E2E6ED] text-xs">
-                        {planTypes.map((plan) => (
-                          <tr
-                            key={plan.id}
-                            className={`transition-colors ${
-                              plan.isActive ? 'hover:bg-[#F5F7FA]' : 'opacity-55 bg-[#F5F7FA]/40'
-                            }`}
-                          >
-                            <td className="py-3.5 px-4 font-semibold text-[#1A2333]">
-                              {plan.name}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${
-                                  plan.category === 'Personal Training'
-                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                    : 'bg-[#E8EFFE] text-[#2F6FED] border-[#2F6FED]/20'
-                                }`}
-                              >
-                                {plan.category || 'Regular'}
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 font-medium text-[#1A2333]">
-                              {plan.displayDuration}
-                            </td>
-                            <td className="py-3.5 px-4 font-medium text-[#1A2333] tabular-nums">
-                              ₹ {(plan.standardFee || 0).toLocaleString('en-IN')}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-1.5">
-                                <span
-                                  className="w-1.5 h-1.5 rounded-full"
-                                  style={{
-                                    backgroundColor: plan.isActive ? '#2E9E6D' : '#6B7686',
-                                  }}
-                                />
-                                <span
-                                  className="font-medium"
-                                  style={{ color: plan.isActive ? '#2E9E6D' : '#6B7686' }}
-                                >
-                                  {plan.isActive ? 'Active' : 'Inactive'}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => {
-                                    setEditingPlan(plan);
-                                    setPlanForm({
-                                      name: plan.name,
-                                      category: plan.category || 'Regular',
-                                      durationValue: plan.durationValue || 1,
-                                      durationUnit: plan.durationUnit,
-                                      standardFee: plan.standardFee || 2500,
-                                    });
-                                    setIsAddPlanModalOpen(true);
-                                  }}
-                                  className="p-1 text-[#6B7686] hover:text-[#2F6FED] hover:bg-[#E8EFFE] rounded transition-colors"
-                                  title="Edit plan configuration"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
+                        {planTypes.map((plan) => {
+                          const hasGst = plan.hasGst !== false;
+                          const rate = hasGst ? (plan.gstRate !== undefined ? plan.gstRate : (gymConfig.defaultGstRate || 18)) : 0;
+                          const baseFee = plan.standardFee || 0;
+                          const total = plan.totalWithGst !== undefined
+                            ? plan.totalWithGst
+                            : hasGst
+                            ? baseFee + Math.round(baseFee * (rate / 100))
+                            : baseFee;
 
-                                <button
-                                  onClick={() => handleTogglePlanStatus(plan.id)}
-                                  className={`px-2.5 py-1 text-[11px] font-medium rounded border transition-colors ${
-                                    plan.isActive
-                                      ? 'border-[#E2E6ED] text-[#6B7686] hover:text-[#D14343] hover:border-[#D14343]'
-                                      : 'border-[#2E9E6D] text-[#2E9E6D] hover:bg-[#E8EFFE]'
+                          return (
+                            <tr
+                              key={plan.id}
+                              className={`transition-colors ${
+                                plan.isActive ? 'hover:bg-[#F5F7FA]' : 'opacity-55 bg-[#F5F7FA]/40'
+                              }`}
+                            >
+                              <td className="py-3.5 px-4 font-semibold text-[#1A2333]">
+                                {plan.name}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${
+                                    plan.category === 'Personal Training'
+                                      ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                      : 'bg-[#E8EFFE] text-[#2F6FED] border-[#2F6FED]/20'
                                   }`}
                                 >
-                                  {plan.isActive ? 'Deactivate' : 'Activate'}
-                                </button>
+                                  {plan.category || 'Regular'}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 font-medium text-[#1A2333]">
+                                {plan.displayDuration}
+                              </td>
+                              <td className="py-3.5 px-4 font-medium text-[#1A2333] tabular-nums">
+                                ₹ {baseFee.toLocaleString('en-IN')}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {hasGst ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                    <Percent className="w-2.5 h-2.5" />
+                                    With GST ({rate}%)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                                    Without GST (Exempt)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 font-bold text-[#1A2333] tabular-nums">
+                                ₹ {total.toLocaleString('en-IN')}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{
+                                      backgroundColor: plan.isActive ? '#2E9E6D' : '#6B7686',
+                                    }}
+                                  />
+                                  <span
+                                    className="font-medium"
+                                    style={{ color: plan.isActive ? '#2E9E6D' : '#6B7686' }}
+                                  >
+                                    {plan.isActive ? 'Active' : 'Inactive'}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setEditingPlan(plan);
+                                      setPlanForm({
+                                        name: plan.name,
+                                        category: plan.category || 'Regular',
+                                        durationValue: plan.durationValue || 1,
+                                        durationUnit: plan.durationUnit,
+                                        standardFee: plan.standardFee || 2500,
+                                        hasGst: plan.hasGst !== false,
+                                        gstRate: plan.gstRate !== undefined ? plan.gstRate : (gymConfig.defaultGstRate || 18),
+                                      });
+                                      setIsAddPlanModalOpen(true);
+                                    }}
+                                    className="p-1 text-[#6B7686] hover:text-[#2F6FED] hover:bg-[#E8EFFE] rounded transition-colors"
+                                    title="Edit plan configuration"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
 
-                                <button
-                                  onClick={() => handleDeletePlan(plan.id, plan.name)}
-                                  className="p-1 text-[#6B7686] hover:text-[#D14343] hover:bg-[#FEE2E2] rounded transition-colors"
-                                  title="Delete fee type"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                                  <button
+                                    onClick={() => handleTogglePlanStatus(plan.id)}
+                                    className={`px-2.5 py-1 text-[11px] font-medium rounded border transition-colors ${
+                                      plan.isActive
+                                        ? 'border-[#E2E6ED] text-[#6B7686] hover:text-[#D14343] hover:border-[#D14343]'
+                                        : 'border-[#2E9E6D] text-[#2E9E6D] hover:bg-[#E8EFFE]'
+                                    }`}
+                                  >
+                                    {plan.isActive ? 'Deactivate' : 'Activate'}
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeletePlan(plan.id, plan.name)}
+                                    className="p-1 text-[#6B7686] hover:text-[#D14343] hover:bg-[#FEE2E2] rounded transition-colors"
+                                    title="Delete fee type"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
                   <div className="text-[11px] text-[#6B7686] italic">
-                    Tip: Gym owners can add custom durations such as "3 Months," "6 Months," or "Trial 14 Days" for seasonal promotions.
+                    Tip: Plans configured as "With GST" dynamically calculate CGST + SGST in new member registrations and fee receipts. Plans configured as "Without GST" remain tax exempt (₹0 tax).
                   </div>
                 </div>
               )}
@@ -1061,8 +1571,8 @@ function SettingsPage() {
       {/* MODAL 3: ADD / EDIT PLAN TYPE */}
       {isAddPlanModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white border border-[#E2E6ED] rounded-xl shadow-card w-full max-w-md overflow-hidden animate-fade-in">
-            <div className="px-6 py-4 border-b border-[#E2E6ED] flex items-center justify-between">
+          <div className="bg-white border border-[#E2E6ED] rounded-xl shadow-card w-full max-w-md overflow-hidden animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-[#E2E6ED] flex items-center justify-between sticky top-0 bg-white z-10">
               <h3 className="font-heading text-base font-bold text-[#1A2333]">
                 {editingPlan ? 'Edit Fee Type' : 'Add Fee Type'}
               </h3>
@@ -1075,8 +1585,8 @@ function SettingsPage() {
             </div>
 
             <form onSubmit={handleSavePlanType} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
+              <div className="space-y-3">
+                <div>
                   <label className="block text-xs font-semibold text-[#1A2333] mb-1">
                     Fee Type Name *
                   </label>
@@ -1090,45 +1600,130 @@ function SettingsPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A2333] mb-1">
-                    Category *
-                  </label>
-                  <select
-                    value={planForm.category || 'Regular'}
-                    onChange={(e) =>
-                      setPlanForm({
-                        ...planForm,
-                        category: e.target.value as 'Regular' | 'Personal Training',
-                      })
-                    }
-                    className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] bg-white font-medium"
-                  >
-                    <option value="Regular">Regular</option>
-                    <option value="Personal Training">Personal Training</option>
-                  </select>
-                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#1A2333] mb-1">
+                      Category *
+                    </label>
+                    <select
+                      value={planForm.category || 'Regular'}
+                      onChange={(e) =>
+                        setPlanForm({
+                          ...planForm,
+                          category: e.target.value as 'Regular' | 'Personal Training',
+                        })
+                      }
+                      className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] bg-white font-medium"
+                    >
+                      <option value="Regular">Regular</option>
+                      <option value="Personal Training">Personal Training</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A2333] mb-1">
-                    Standard Fee (₹) *
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    required
-                    value={planForm.standardFee || 0}
-                    onChange={(e) =>
-                      setPlanForm({
-                        ...planForm,
-                        standardFee: Number(e.target.value),
-                      })
-                    }
-                    className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] tabular-nums"
-                  />
+                  <div>
+                    <label className="block text-xs font-semibold text-[#1A2333] mb-1">
+                      Base Fee (₹) *
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      required
+                      value={planForm.standardFee || 0}
+                      onChange={(e) =>
+                        setPlanForm({
+                          ...planForm,
+                          standardFee: Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-3 py-2 text-xs border border-[#E2E6ED] rounded-lg focus:outline-none focus:border-[#2F6FED] tabular-nums font-bold"
+                    />
+                  </div>
                 </div>
               </div>
 
+              {/* GST APPLICABILITY FOR THIS FEE */}
+              <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E6ED] rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-[#1A2333]">
+                    GST Applicable *
+                  </label>
+                  <span className="text-[10px] text-[#6B7686]">
+                    Global: {gymConfig.gstEnabled ? 'GST Enabled' : 'Tax Exempt'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPlanForm({
+                        ...planForm,
+                        hasGst: true,
+                        gstRate: planForm.gstRate || gymConfig.defaultGstRate || 18,
+                      })
+                    }
+                    className={`py-2 px-3 text-xs font-semibold rounded-lg border text-center transition-all ${
+                      planForm.hasGst !== false
+                        ? 'bg-[#2F6FED] text-white border-[#2F6FED] shadow-xs'
+                        : 'bg-white text-[#1A2333] border-[#E2E6ED] hover:bg-[#F5F7FA]'
+                    }`}
+                  >
+                    With GST
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPlanForm({ ...planForm, hasGst: false, gstRate: 0 })}
+                    className={`py-2 px-3 text-xs font-semibold rounded-lg border text-center transition-all ${
+                      planForm.hasGst === false
+                        ? 'bg-[#2F6FED] text-white border-[#2F6FED] shadow-xs'
+                        : 'bg-white text-[#1A2333] border-[#E2E6ED] hover:bg-[#F5F7FA]'
+                    }`}
+                  >
+                    Without GST (0%)
+                  </button>
+                </div>
+
+                {/* If With GST is selected, allow choosing / entering GST Rate */}
+                {planForm.hasGst !== false && (
+                  <div className="pt-2 border-t border-[#E2E6ED] space-y-2">
+                    <label className="block text-[11px] font-semibold text-[#6B7686]">
+                      GST Rate for this Fee:
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {[18, 12, 5].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setPlanForm({ ...planForm, gstRate: r })}
+                          className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+                            (planForm.gstRate || 18) === r
+                              ? 'bg-blue-50 text-[#2F6FED] border-[#2F6FED] font-bold'
+                              : 'bg-white text-[#6B7686] border-[#E2E6ED] hover:bg-[#F5F7FA]'
+                          }`}
+                        >
+                          {r}%
+                        </button>
+                      ))}
+                      <div className="flex items-center gap-1 ml-auto">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={planForm.gstRate !== undefined ? planForm.gstRate : 18}
+                          onChange={(e) =>
+                            setPlanForm({ ...planForm, gstRate: Number(e.target.value) })
+                          }
+                          className="w-14 px-2 py-1 text-xs border border-[#E2E6ED] rounded text-center font-bold"
+                        />
+                        <span className="text-xs text-[#6B7686]">%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* DURATION */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-[#1A2333] mb-1">
@@ -1173,17 +1768,43 @@ function SettingsPage() {
                 )}
               </div>
 
-              {/* Live Duration Preview */}
-              <div className="p-3 bg-[#F5F7FA] border border-[#E2E6ED] rounded-lg text-xs flex items-center justify-between">
-                <span className="text-[#6B7686]">Calculated Membership Duration:</span>
-                <span className="font-bold text-[#2F6FED]">
-                  {planForm.durationUnit === 'One-time'
-                    ? 'One-time'
-                    : planForm.durationValue === 1
-                    ? `1 ${planForm.durationUnit.slice(0, -1)}`
-                    : `${planForm.durationValue} ${planForm.durationUnit}`}
-                </span>
-              </div>
+              {/* LIVE FEE & GST BREAKDOWN PREVIEW */}
+              {(() => {
+                const base = Number(planForm.standardFee) || 0;
+                const hasGst = planForm.hasGst !== false;
+                const rate = hasGst
+                  ? planForm.gstRate !== undefined
+                    ? planForm.gstRate
+                    : gymConfig.defaultGstRate || 18
+                  : 0;
+                const tax = hasGst ? Math.round(base * (rate / 100)) : 0;
+                const total = base + tax;
+
+                return (
+                  <div className="p-3.5 bg-gradient-to-r from-blue-50/70 to-indigo-50/50 border border-blue-200/80 rounded-xl space-y-1.5 text-xs">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Base Membership Fee:</span>
+                      <span className="font-semibold tabular-nums">
+                        ₹ {base.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>
+                        GST {hasGst ? `@ ${rate}% (CGST + SGST)` : '(0% / Exempt)'}:
+                      </span>
+                      <span className="font-semibold tabular-nums">
+                        {hasGst ? `₹ ${tax.toLocaleString('en-IN')}` : '₹ 0'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-bold text-[#1A2333] pt-1.5 border-t border-blue-200">
+                      <span>Total Payable Amount:</span>
+                      <span className="font-extrabold text-[#2F6FED] text-sm tabular-nums">
+                        ₹ {total.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button

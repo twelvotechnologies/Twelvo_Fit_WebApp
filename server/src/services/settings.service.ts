@@ -9,6 +9,7 @@ import {
   PaymentTypeItem,
   DurationUnit,
   UpiIdItem,
+  GymConfigSettings,
 } from '../types/settings.types.js';
 
 export class SettingsService {
@@ -403,6 +404,12 @@ export class SettingsService {
   private static formatPlanType(p: any): PlanTypeItem {
     const unit = p.durationUnit as DurationUnit;
     const val = Number(p.durationValue);
+    const hasGst = (p as any).hasGst !== undefined ? Boolean((p as any).hasGst) : true;
+    const gstRate = (p as any).gstRate !== undefined ? Number((p as any).gstRate) : 18;
+    const standardFee = Number(p.standardFee);
+    const taxAmount = hasGst ? Math.round(standardFee * (gstRate / 100)) : 0;
+    const totalWithGst = standardFee + taxAmount;
+
     return {
       id: p.planId.toString(),
       planId: p.planId.toString(),
@@ -412,10 +419,63 @@ export class SettingsService {
       durationValue: val,
       durationUnit: unit,
       displayDuration: SettingsService.computeDisplayDuration(val, unit),
-      standardFee: Number(p.standardFee),
+      standardFee,
+      hasGst,
+      gstRate,
+      totalWithGst,
       isActive: p.isActive,
       createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,
     };
+  }
+
+  // Configuration Cache per Tenant
+  private static configCache: Record<number, GymConfigSettings> = {};
+
+  static async getConfig(tenantId?: number): Promise<GymConfigSettings> {
+    const tid = await this.getTenantId(tenantId);
+    if (this.configCache[tid]) return this.configCache[tid];
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { tenantId: tid },
+    });
+
+    const config: GymConfigSettings = {
+      gstEnabled: true,
+      defaultGstRate: 18,
+      gstin: tenant?.gstNumber || '27AABCP1234F1Z8',
+      taxCalculationType: 'EXCLUSIVE',
+      businessLegalName: tenant?.gymName || 'Twelvo Gym & Fitness Pvt Ltd',
+      invoicePrefix: 'REC',
+      panNumber: tenant?.gstNumber ? tenant.gstNumber.slice(2, 12) : 'AABCP1234F',
+    };
+    this.configCache[tid] = config;
+    return config;
+  }
+
+  static async updateConfig(data: Partial<GymConfigSettings>, tenantId?: number): Promise<GymConfigSettings> {
+    const tid = await this.getTenantId(tenantId);
+    const current = await this.getConfig(tid);
+
+    const updated: GymConfigSettings = {
+      ...current,
+      ...data,
+      gstEnabled: data.gstEnabled !== undefined ? Boolean(data.gstEnabled) : current.gstEnabled,
+      defaultGstRate: data.defaultGstRate !== undefined ? Number(data.defaultGstRate) : current.defaultGstRate,
+    };
+
+    this.configCache[tid] = updated;
+
+    if (data.gstin || data.businessLegalName) {
+      await prisma.tenant.update({
+        where: { tenantId: tid },
+        data: {
+          ...(data.gstin ? { gstNumber: data.gstin } : {}),
+          ...(data.businessLegalName ? { gymName: data.businessLegalName } : {}),
+        },
+      }).catch((e) => console.warn('Non-critical: Failed to sync tenant fields:', e));
+    }
+
+    return updated;
   }
 
   static async getPlanTypes(tenantId?: number): Promise<PlanTypeItem[]> {

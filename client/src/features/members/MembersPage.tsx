@@ -1,8 +1,8 @@
 import { memo, useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Users,
   Search,
-  Plus,
   X,
   RefreshCw,
   AlertTriangle,
@@ -15,8 +15,12 @@ import {
   AlertCircle,
   ShieldCheck,
   UserCheck,
+  UserPlus,
   Building2,
   Eye,
+  MessageCircle,
+  Printer,
+  ArrowRight,
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/useAuthStore';
 import {
@@ -32,6 +36,11 @@ import {
 } from '../../api/membersApi';
 import { getPlanTypes, getPaymentTypes } from '../../api/settingsApi';
 import { PlanTypeItem, PaymentTypeItem } from '../../api/types';
+import { ReceiptItem } from '../../api/receiptsApi';
+import {
+  generateReceiptInvoiceWhatsAppText,
+  openWhatsAppWeb,
+} from '../../utils/whatsapp';
 
 // Standard plan pricing reference
 const PLAN_STANDARD_FEES: Record<string, number> = {
@@ -107,8 +116,32 @@ function MembersPage() {
   const [isOverrideDrawerOpen, setIsOverrideDrawerOpen] = useState(false);
   const [drawerOverrideDate, setDrawerOverrideDate] = useState('');
 
-  // --- Add Member Form State ---
-  const [pathType, setPathType] = useState<'NEW' | 'EXISTING'>('NEW');
+  // Printable receipt slip modal
+  const [activeReceiptForSlip, setActiveReceiptForSlip] = useState<ReceiptItem | null>(null);
+
+  const handleShareWhatsApp = (receipt: ReceiptItem) => {
+    const gymName = user?.gymName || 'Twelvo Gym & Fitness';
+    const text = generateReceiptInvoiceWhatsAppText(
+      {
+        receiptNo: receipt.receiptNo,
+        memberName: receipt.memberName,
+        memberPhone: receipt.memberPhone,
+        plan: receipt.plan,
+        planCategory: receipt.planCategory,
+        amount: receipt.amount,
+        tax: receipt.tax,
+        total: receipt.total,
+        paymentDate: receipt.paymentDate,
+        paymentMode: receipt.paymentMode,
+        referenceNo: receipt.referenceNo,
+      },
+      gymName
+    );
+    openWhatsAppWeb(receipt.memberPhone, text);
+  };
+
+  // --- Add Existing Member (Backfill) Form State ---
+  const pathType: 'NEW' | 'EXISTING' = 'EXISTING';
 
   // Shared Base Fields
   const [name, setName] = useState('');
@@ -120,15 +153,15 @@ function MembersPage() {
   const [showEmergencyFields, setShowEmergencyFields] = useState(false);
   const [assignedTrainer, setAssignedTrainer] = useState('Rajesh Kumar');
 
-  // Path 1 (New) & Path 2 (Existing) Plan & Dates
-  const [joiningDate, setJoiningDate] = useState(getTodayISO()); // Defaults to today for NEW, cleared for EXISTING
+  // Existing Member Plan & Dates
+  const [joiningDate, setJoiningDate] = useState(''); // Cleared for existing members
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [lastPaymentDate, setLastPaymentDate] = useState(''); // Existing member only
   const [isDueDateOverridden, setIsDueDateOverridden] = useState(false);
   const [manualDueDateOverride, setManualDueDateOverride] = useState('');
 
-  // Payment Section
-  const [recordPaymentNow, setRecordPaymentNow] = useState(true); // Default ON for NEW, OFF for EXISTING
+  // Payment Section (Default OFF for existing users)
+  const [recordPaymentNow, setRecordPaymentNow] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState(2500);
   const [paymentMode, setPaymentMode] = useState<'UPI' | 'Card' | 'Bank Transfer' | 'Cash'>('UPI');
   const [paymentDate, setPaymentDate] = useState(getTodayISO());
@@ -163,24 +196,22 @@ function MembersPage() {
     loadData();
   }, []);
 
-  // When switching path type, set correct defaults
-  const handleSwitchPathType = (type: 'NEW' | 'EXISTING') => {
-    setPathType(type);
-    if (type === 'NEW') {
-      setJoiningDate(getTodayISO());
-      setLastPaymentDate('');
-      setIsDueDateOverridden(false);
-      setManualDueDateOverride('');
-      setRecordPaymentNow(true); // Default ON for new
-      setPaymentDate(getTodayISO());
-    } else {
-      setJoiningDate(''); // Required, NO default for existing
-      setLastPaymentDate('');
-      setIsDueDateOverridden(false);
-      setManualDueDateOverride('');
-      setRecordPaymentNow(false); // Default OFF for existing
-      setPaymentDate(getTodayISO());
-    }
+  // Open modal for existing member backfill
+  const handleOpenExistingModal = () => {
+    setName('');
+    setPhone('');
+    setEmail('');
+    setPhoto('');
+    setEmergencyName('');
+    setEmergencyPhone('');
+    setShowEmergencyFields(false);
+    setJoiningDate('');
+    setLastPaymentDate('');
+    setIsDueDateOverridden(false);
+    setManualDueDateOverride('');
+    setRecordPaymentNow(false);
+    setPaymentDate(getTodayISO());
+    setIsAddModalOpen(true);
   };
 
   // Currently selected plan object
@@ -218,18 +249,13 @@ function MembersPage() {
       return 'One-time';
     }
 
-    if (pathType === 'NEW') {
+    if (lastPaymentDate) {
+      return calculateDueDate(lastPaymentDate, currentPlan.durationUnit, currentPlan.durationValue);
+    } else if (joiningDate) {
       return calculateDueDate(joiningDate, currentPlan.durationUnit, currentPlan.durationValue);
-    } else {
-      // Existing member
-      if (lastPaymentDate) {
-        return calculateDueDate(lastPaymentDate, currentPlan.durationUnit, currentPlan.durationValue);
-      } else if (joiningDate) {
-        return calculateDueDate(joiningDate, currentPlan.durationUnit, currentPlan.durationValue);
-      }
-      return '';
     }
-  }, [pathType, joiningDate, lastPaymentDate, currentPlan, isDueDateOverridden, manualDueDateOverride]);
+    return '';
+  }, [joiningDate, lastPaymentDate, currentPlan, isDueDateOverridden, manualDueDateOverride]);
 
   // Inline warning visibility for existing member
   const isEstimateWarningVisible =
@@ -312,21 +338,25 @@ function MembersPage() {
       setEmergencyName('');
       setEmergencyPhone('');
       setShowEmergencyFields(false);
-      handleSwitchPathType('NEW');
+      setJoiningDate('');
+      setLastPaymentDate('');
+      setIsDueDateOverridden(false);
+      setManualDueDateOverride('');
+      setRecordPaymentNow(false);
 
       if (result.isAutoApproved && result.member) {
         setMembers((prev) => [result.member!, ...prev]);
         setActiveTab('ALL');
         if (result.receipt) {
-          alert(`Member ${result.member.name} registered and Receipt #${result.receipt.receiptNo} generated!`);
+          setActiveReceiptForSlip(result.receipt);
         } else {
-          alert(`Member ${result.member.name} registered successfully!`);
+          alert(`Existing member ${result.member.name} backfilled successfully!`);
         }
       } else if (result.pendingRegistration) {
         setPendingRegistrations((prev) => [result.pendingRegistration!, ...prev]);
         setActiveTab('PENDING_REGISTRATION');
         alert(
-          `Registration for ${result.pendingRegistration.name} submitted by trainer and queued in 'Pending Registration' for admin review.`
+          `Record for ${result.pendingRegistration.name} submitted by trainer and queued in 'Pending Registration' for admin review.`
         );
       }
     } catch (err) {
@@ -470,16 +500,46 @@ function MembersPage() {
           </button>
 
           <button
-            onClick={() => {
-              handleSwitchPathType('NEW');
-              setIsAddModalOpen(true);
-            }}
+            onClick={handleOpenExistingModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[#1A2333] rounded-lg text-xs font-semibold transition-colors shadow-subtle"
+            title="Backfill existing gym member record without registration fee"
+          >
+            <UserCheck className="w-4 h-4 text-[#2F6FED]" />
+            <span>Add Existing Member</span>
+          </button>
+
+          <Link
+            to="/registration"
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#2F6FED] hover:bg-[#2558bf] text-white rounded-lg text-xs font-semibold transition-colors shadow-sm"
           >
-            <Plus className="w-4 h-4" />
-            Add Member
-          </button>
+            <UserPlus className="w-4 h-4" />
+            <span>Register New Member</span>
+          </Link>
         </div>
+      </div>
+
+      {/* Notice Banner linking to dedicated Registration module */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50/50 border border-blue-200/70 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[#2F6FED] text-white flex items-center justify-center flex-shrink-0 shadow-xs">
+            <UserPlus className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-[#1A2333]">
+              Need to register a brand new member?
+            </div>
+            <div className="text-[11px] text-[#6B7686]">
+              New member registrations with joining fees & instant WhatsApp invoices have moved to the dedicated Registration module.
+            </div>
+          </div>
+        </div>
+        <Link
+          to="/registration"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#2F6FED] hover:bg-[#2558bf] text-white rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
+        >
+          <span>Open Registration Module</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </Link>
       </div>
 
       {/* ========================================================================= */}
@@ -904,7 +964,7 @@ function MembersPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* ADD MEMBER MODAL: TWO DISTINCT PATHS (NEW VS EXISTING MEMBER) */}
+      {/* ADD EXISTING MEMBER (BACKFILL) MODAL */}
       {/* ========================================================================= */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -913,49 +973,20 @@ function MembersPage() {
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0 bg-slate-50/70">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center shadow-2xs">
-                  <Users className="w-5 h-5" />
+                  <UserCheck className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="font-heading text-lg font-bold text-slate-900 tracking-tight">
-                    Add Member to Gym
+                    Add Existing Member (Backfill)
                   </h3>
                   <p className="text-xs text-slate-500 font-medium">
-                    {pathType === 'NEW'
-                      ? 'Signing up new member today — dues automatically calculated from today'
-                      : 'Backfill existing member record — preserve historical join & payment cycles'}
+                    Backfill existing gym member record into the roster without charging a registration fee. Preserves previous join date and payment cycles.
                   </p>
                 </div>
               </div>
 
-              {/* Header Right: Path Selector + Submitter Role + Close */}
+              {/* Header Right: Role Badge + Close */}
               <div className="flex items-center gap-3">
-                {/* Segmented Path Switcher */}
-                <div className="hidden sm:flex rounded-xl p-1 bg-slate-100 border border-slate-200/80">
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchPathType('NEW')}
-                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                      pathType === 'NEW'
-                        ? 'bg-white text-blue-600 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    New Member
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchPathType('EXISTING')}
-                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                      pathType === 'EXISTING'
-                        ? 'bg-white text-blue-600 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Existing (Backfill)
-                  </button>
-                </div>
-
-                {/* Submitter Role Context Badge */}
                 <div
                   className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[11px] font-semibold ${
                     isTrainer
@@ -965,7 +996,7 @@ function MembersPage() {
                 >
                   <ShieldCheck className={`w-3.5 h-3.5 ${isTrainer ? 'text-amber-600' : 'text-blue-600'}`} />
                   <span>
-                    {isTrainer ? 'Trainer Submission (Admin Approval Required)' : 'Admin Registration (Auto-Verified)'}
+                    {isTrainer ? 'Trainer Submission (Admin Approval Required)' : 'Admin Backfill (Auto-Verified)'}
                   </span>
                 </div>
 
@@ -980,30 +1011,6 @@ function MembersPage() {
 
             {/* Form Body: Wide 2-Column Grid */}
             <form onSubmit={handleSaveMember} className="p-6 overflow-y-auto flex-1">
-              {/* Mobile Path Switcher fallback */}
-              <div className="sm:hidden mb-4">
-                <div className="flex rounded-xl p-1 bg-slate-100 border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchPathType('NEW')}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg ${
-                      pathType === 'NEW' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
-                    }`}
-                  >
-                    New Member
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSwitchPathType('EXISTING')}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg ${
-                      pathType === 'EXISTING' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
-                    }`}
-                  >
-                    Existing (Backfill)
-                  </button>
-                </div>
-              </div>
-
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {/* ========================================================= */}
                 {/* LEFT COLUMN: Personal & Contact Information (Col 6) */}
@@ -1154,7 +1161,7 @@ function MembersPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                          {pathType === 'NEW' ? 'Joining Date' : 'Original Joining Date'} <span className="text-red-500">*</span>
+                          Original Joining Date <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="date"
@@ -1285,9 +1292,7 @@ function MembersPage() {
                           Record Upfront Payment Now
                         </span>
                         <p className="text-[11px] text-slate-500">
-                          {pathType === 'NEW'
-                            ? 'Record joining fee & generate verified GST receipt immediately'
-                            : 'Enable only if collecting an immediate payment now'}
+                          Enable only if collecting an immediate payment now
                         </p>
                       </div>
 
@@ -1392,10 +1397,10 @@ function MembersPage() {
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                      className="flex-1 py-2.5 bg-[#2F6FED] hover:bg-[#2558bf] text-white rounded-xl text-xs font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      <span>{pathType === 'NEW' ? 'Register New Member' : 'Backfill Existing Member'}</span>
+                      <span>Backfill Existing Member</span>
                     </button>
                   </div>
                 </div>
@@ -1752,6 +1757,106 @@ function MembersPage() {
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* PRINTABLE RECEIPT SLIP MODAL */}
+      {/* ========================================================================= */}
+      {activeReceiptForSlip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white border border-[#E2E6ED] rounded-xl shadow-card w-full max-w-md overflow-hidden">
+            <div className="p-6 space-y-6">
+              <div className="text-center pb-4 border-b border-[#E2E6ED]">
+                <div className="font-heading text-lg font-extrabold text-[#1A2333] tracking-tight">
+                  {user?.gymName || 'GymERP Fitness Center'}
+                </div>
+                <div className="text-[11px] text-[#6B7686] mt-0.5">
+                  Downtown Flagship Branch • GSTIN: 27AABCP1234F1Z8
+                </div>
+                <div className="inline-block px-2.5 py-0.5 mt-2 bg-[#E8EFFE] text-[#2F6FED] text-[10px] font-bold rounded-full uppercase tracking-wider">
+                  Payment Receipt Slip
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-[#6B7686]">Receipt No:</span>{' '}
+                  <span className="font-semibold text-[#1A2333]">{activeReceiptForSlip.receiptNo}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#6B7686]">Date:</span>{' '}
+                  <span className="font-semibold text-[#1A2333]">{activeReceiptForSlip.paymentDate}</span>
+                </div>
+                <div>
+                  <span className="text-[#6B7686]">Member:</span>{' '}
+                  <span className="font-semibold text-[#1A2333]">{activeReceiptForSlip.memberName}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#6B7686]">Mode:</span>{' '}
+                  <span className="font-semibold text-[#1A2333]">{activeReceiptForSlip.paymentMode}</span>
+                </div>
+              </div>
+
+              <div className="border border-[#E2E6ED] rounded-lg overflow-hidden text-xs">
+                <div className="bg-[#F5F7FA] px-3 py-2 font-semibold text-[#6B7686] flex justify-between border-b border-[#E2E6ED]">
+                  <span>Description</span>
+                  <span>Amount</span>
+                </div>
+                <div className="p-3 space-y-2">
+                  <div className="flex justify-between">
+                    <div>
+                      <div className="font-medium text-[#1A2333]">{activeReceiptForSlip.plan}</div>
+                      <div className="text-[10px] text-[#6B7686]">
+                        {activeReceiptForSlip.planCategory || 'Regular'} Tier
+                      </div>
+                    </div>
+                    <span className="tabular-nums font-medium text-[#1A2333]">
+                      ₹{(activeReceiptForSlip.amount || 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[#6B7686] pt-1 border-t border-[#E2E6ED]">
+                    <span>GST @ 18%</span>
+                    <span className="tabular-nums">₹{(activeReceiptForSlip.tax || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-[#1A2333] pt-1 border-t border-[#E2E6ED]">
+                    <span>Net Paid:</span>
+                    <span className="tabular-nums text-[#2F6FED]">
+                      ₹{(activeReceiptForSlip.total || 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-[#6B7686] text-center italic">
+                Thank you for your business! Keep pushing your fitness goals.
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-[#E2E6ED]">
+                <button
+                  onClick={() => setActiveReceiptForSlip(null)}
+                  className="px-3.5 py-1.5 border border-[#E2E6ED] hover:bg-[#F5F7FA] rounded-lg text-xs font-medium text-[#1A2333]"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => handleShareWhatsApp(activeReceiptForSlip)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  title="Open WhatsApp Web to send this receipt invoice"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Send to WhatsApp Web</span>
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#2F6FED] hover:bg-[#2558bf] text-white rounded-lg text-xs font-medium"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Slip</span>
+                </button>
               </div>
             </div>
           </div>

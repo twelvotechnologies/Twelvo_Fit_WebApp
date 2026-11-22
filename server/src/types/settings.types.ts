@@ -46,6 +46,16 @@ export interface UpdateBankAccountDTO {
   isActive?: boolean;
 }
 
+export interface GymConfigSettings {
+  gstEnabled: boolean;
+  defaultGstRate: number;
+  gstin?: string;
+  taxCalculationType: 'EXCLUSIVE' | 'INCLUSIVE';
+  businessLegalName?: string;
+  invoicePrefix?: string;
+  panNumber?: string;
+}
+
 export type DurationUnit = 'Days' | 'Months' | 'Years' | 'One-time';
 
 export interface PlanTypeItem {
@@ -58,6 +68,9 @@ export interface PlanTypeItem {
   durationUnit: DurationUnit;
   displayDuration: string;
   standardFee: number;
+  hasGst?: boolean;
+  gstRate?: number;
+  totalWithGst?: number;
   isActive: boolean;
   createdAt?: string;
 }
@@ -68,6 +81,8 @@ export interface CreatePlanTypeDTO {
   durationValue?: number;
   durationUnit: DurationUnit;
   standardFee?: number;
+  hasGst?: boolean;
+  gstRate?: number;
   tenantId?: number;
 }
 
@@ -77,6 +92,8 @@ export interface UpdatePlanTypeDTO {
   durationValue?: number;
   durationUnit?: DurationUnit;
   standardFee?: number;
+  hasGst?: boolean;
+  gstRate?: number;
   isActive?: boolean;
 }
 

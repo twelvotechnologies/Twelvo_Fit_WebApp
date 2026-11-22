@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 
 // Lazy load feature pages with automatic chunk retry and dev reload handling
 const DashboardPage = lazyWithRetry(() => import('../features/dashboard/DashboardPage'));
+const RegistrationPage = lazyWithRetry(() => import('../features/registration/RegistrationPage'));
 const PayrollListPage = lazyWithRetry(() => import('../features/payroll/PayrollListPage'));
 const StaffDetailPage = lazyWithRetry(() => import('../features/payroll/StaffDetailPage'));
 const ReceiptsPage = lazyWithRetry(() => import('../features/receipts/ReceiptsPage'));
@@ -78,6 +79,14 @@ const router = createBrowserRouter([
             element: <DashboardHome />,
           },
           // Shared modules: accessible to both Gym Owners and Floor Trainers
+          {
+            path: 'registration',
+            element: (
+              <Suspense fallback={<PageLoader label="Loading Registration..." />}>
+                <RegistrationPage />
+              </Suspense>
+            ),
+          },
           {
             path: 'receipts',
             element: (

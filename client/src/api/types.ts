@@ -124,6 +124,16 @@ export interface BankAccountItem {
   isActive: boolean;
 }
 
+export interface GymConfigSettings {
+  gstEnabled: boolean; // Yes or No
+  defaultGstRate: number; // e.g. 18
+  gstin?: string;
+  taxCalculationType: 'EXCLUSIVE' | 'INCLUSIVE';
+  businessLegalName?: string;
+  invoicePrefix?: string;
+  panNumber?: string;
+}
+
 export type DurationUnit = 'Days' | 'Months' | 'Years' | 'One-time';
 export type FeeCategory = 'Regular' | 'Personal Training' | string;
 
@@ -135,6 +145,9 @@ export interface FeeTypeItem {
   durationUnit: DurationUnit;
   displayDuration: string;
   standardFee: number;
+  hasGst?: boolean; // With or without GST: true (Yes) or false (No)
+  gstRate?: number; // GST percentage e.g. 18
+  totalWithGst?: number; // Calculated or entered: standardFee + GST
   isActive: boolean;
 }
 

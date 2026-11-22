@@ -21,8 +21,13 @@ import {
   Building2,
   Users,
   Eye,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/useAuthStore';
+import {
+  generateReceiptInvoiceWhatsAppText,
+  openWhatsAppWeb,
+} from '../../utils/whatsapp';
 import {
   getReceipts,
   getPendingReceipts,
@@ -32,8 +37,8 @@ import {
   ReceiptItem,
 } from '../../api/receiptsApi';
 import { getMembers, MemberRecord } from '../../api/membersApi';
-import { getPlanTypes, getPaymentTypes } from '../../api/settingsApi';
-import { PlanTypeItem, PaymentTypeItem } from '../../api/types';
+import { getPlanTypes, getPaymentTypes, getGymConfiguration, DEFAULT_GYM_CONFIG } from '../../api/settingsApi';
+import { PlanTypeItem, PaymentTypeItem, GymConfigSettings } from '../../api/types';
 
 const formatINR = (val: number) => '₹ ' + (val || 0).toLocaleString('en-IN');
 
@@ -70,6 +75,7 @@ function ReceiptsPage() {
   const [activeTab, setActiveTab] = useState<ReceiptTab>('ALL');
 
   // Ledger & Roster Data
+  const [gymConfig, setGymConfig] = useState<GymConfigSettings>(DEFAULT_GYM_CONFIG);
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [pendingReceipts, setPendingReceipts] = useState<ReceiptItem[]>([]);
   const [members, setMembers] = useState<MemberRecord[]>([]);
@@ -111,12 +117,13 @@ function ReceiptsPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [rcpts, pendingRcpts, mems, plans, pts] = await Promise.all([
+      const [rcpts, pendingRcpts, mems, plans, pts, config] = await Promise.all([
         getReceipts(),
         getPendingReceipts(),
         getMembers(),
         getPlanTypes(),
         getPaymentTypes(),
+        getGymConfiguration(),
       ]);
       setReceipts(rcpts);
       setPendingReceipts(pendingRcpts);
@@ -128,6 +135,9 @@ function ReceiptsPage() {
         setCustomAmount(activePlans[0].standardFee || 2500);
       }
       setPaymentTypes(pts.filter((p) => p.isActive));
+      if (config) {
+        setGymConfig(config);
+      }
     } catch (err) {
       console.error('Failed to load receipts data', err);
     } finally {
@@ -260,6 +270,11 @@ function ReceiptsPage() {
       return;
     }
 
+    const isPlanGstApplicable = gymConfig.gstEnabled && currentPlan.hasGst !== false;
+    const currentGstRate = isPlanGstApplicable ? (currentPlan.gstRate ?? gymConfig.defaultGstRate ?? 18) : 0;
+    const currentTaxAmount = isPlanGstApplicable ? Math.round(baseAmount * (currentGstRate / 100)) : 0;
+    const currentTotalAmount = baseAmount + currentTaxAmount;
+
     try {
       setActionLoading(true);
       const result = await submitReceipt(
@@ -272,6 +287,8 @@ function ReceiptsPage() {
           planDurationUnit: currentPlan.durationUnit,
           planDurationValue: currentPlan.durationValue,
           amount: baseAmount,
+          taxAmount: currentTaxAmount,
+          total: currentTotalAmount,
           paymentMode,
           paymentDate,
           referenceNo: referenceNo.trim() || undefined,
@@ -402,6 +419,28 @@ function ReceiptsPage() {
       reviewingPendingReceipt.planDurationValue || 1
     );
   }, [reviewingMember, reviewingPendingReceipt]);
+
+  // Share Receipt Invoice to WhatsApp Web
+  const handleShareWhatsApp = (receipt: ReceiptItem) => {
+    const gymName = user?.gymName || 'Twelvo Gym & Fitness';
+    const text = generateReceiptInvoiceWhatsAppText(
+      {
+        receiptNo: receipt.receiptNo,
+        memberName: receipt.memberName,
+        memberPhone: receipt.memberPhone,
+        plan: receipt.plan,
+        planCategory: receipt.planCategory,
+        amount: receipt.amount,
+        tax: receipt.tax,
+        total: receipt.total,
+        paymentDate: receipt.paymentDate,
+        paymentMode: receipt.paymentMode,
+        referenceNo: receipt.referenceNo,
+      },
+      gymName
+    );
+    openWhatsAppWeb(receipt.memberPhone, text);
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
@@ -659,14 +698,24 @@ function ReceiptsPage() {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => setActiveReceiptForSlip(r)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-[#2F6FED] hover:bg-[#E8EFFE] rounded-md transition-colors"
-                            title="View Printable GST Slip"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                            Print Slip
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleShareWhatsApp(r)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-md transition-colors"
+                              title="Send Receipt Invoice to WhatsApp Web"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>WhatsApp</span>
+                            </button>
+                            <button
+                              onClick={() => setActiveReceiptForSlip(r)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-[#2F6FED] hover:bg-[#E8EFFE] rounded-md transition-colors"
+                              title="View Printable GST Slip"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              Print Slip
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1164,35 +1213,54 @@ function ReceiptsPage() {
                   </div>
 
                   {/* FINANCIAL GST BREAKDOWN CARD */}
-                  <div className="bg-slate-900 text-white rounded-2xl p-4 shadow-md space-y-3">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                      <span>Receipt Financial Breakdown</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium border border-emerald-500/30">
-                        GST 18% Certified
-                      </span>
-                    </div>
+                  {(() => {
+                    const isPlanGstApplicable = gymConfig.gstEnabled && currentPlan.hasGst !== false;
+                    const rate = isPlanGstApplicable ? (currentPlan.gstRate ?? gymConfig.defaultGstRate ?? 18) : 0;
+                    const taxAmt = isPlanGstApplicable ? Math.round(Number(customAmount) * (rate / 100)) : 0;
+                    const totalAmt = Number(customAmount) + taxAmt;
 
-                    <div className="space-y-1.5 text-xs text-slate-300">
-                      <div className="flex justify-between">
-                        <span>Base Membership Fee</span>
-                        <span className="tabular-nums font-semibold text-white">
-                          {formatINR(Number(customAmount))}
-                        </span>
+                    return (
+                      <div className="bg-slate-900 text-white rounded-2xl p-4 shadow-md space-y-3">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                          <span>Receipt Financial Breakdown</span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                              isPlanGstApplicable
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : 'bg-slate-700 text-slate-300 border-slate-600'
+                            }`}
+                          >
+                            {isPlanGstApplicable ? `With GST (${rate}%)` : 'Without GST (Exempt)'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 text-xs text-slate-300">
+                          <div className="flex justify-between">
+                            <span>Base Membership Fee</span>
+                            <span className="tabular-nums font-semibold text-white">
+                              {formatINR(Number(customAmount))}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>
+                              {isPlanGstApplicable
+                                ? `GST Tax (CGST ${rate / 2}% + SGST ${rate / 2}%)`
+                                : 'GST Tax (0% / Exempt)'}
+                            </span>
+                            <span className="tabular-nums font-semibold text-white">
+                              {formatINR(taxAmt)}
+                            </span>
+                          </div>
+                          <div className="pt-2 border-t border-slate-800 flex items-baseline justify-between">
+                            <span className="text-sm font-bold text-white">Total Amount Due</span>
+                            <span className="font-heading font-extrabold text-2xl text-emerald-400 tabular-nums">
+                              {formatINR(totalAmt)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex justify-between">
-                        <span>GST Tax (CGST 9% + SGST 9%)</span>
-                        <span className="tabular-nums font-semibold text-white">
-                          {formatINR(Math.round(Number(customAmount) * 0.18))}
-                        </span>
-                      </div>
-                      <div className="pt-2 border-t border-slate-800 flex items-baseline justify-between">
-                        <span className="text-sm font-bold text-white">Total Amount Due</span>
-                        <span className="font-heading font-extrabold text-2xl text-emerald-400 tabular-nums">
-                          {formatINR(Math.round(Number(customAmount) * 1.18))}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {/* ACTION BUTTONS */}
                   <div className="pt-2 flex items-center justify-end gap-3">
@@ -1468,8 +1536,12 @@ function ReceiptsPage() {
                     </span>
                   </div>
                   <div className="flex justify-between text-[#6B7686] pt-1 border-t border-[#E2E6ED]">
-                    <span>GST @ 18%</span>
-                    <span className="tabular-nums">{formatINR(activeReceiptForSlip.tax)}</span>
+                    <span>
+                      {activeReceiptForSlip.tax && activeReceiptForSlip.tax > 0
+                        ? 'GST Tax (Applicable)'
+                        : 'GST Tax (Exempt / 0%)'}
+                    </span>
+                    <span className="tabular-nums">{formatINR(activeReceiptForSlip.tax || 0)}</span>
                   </div>
                   <div className="flex justify-between font-bold text-[#1A2333] pt-1 border-t border-[#E2E6ED]">
                     <span>Net Paid:</span>
@@ -1484,12 +1556,20 @@ function ReceiptsPage() {
                 Thank you for your business! Keep pushing your fitness goals.
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#E2E6ED]">
+              <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-[#E2E6ED]">
                 <button
                   onClick={() => setActiveReceiptForSlip(null)}
                   className="px-3.5 py-1.5 border border-[#E2E6ED] hover:bg-[#F5F7FA] rounded-lg text-xs font-medium text-[#1A2333]"
                 >
                   Close
+                </button>
+                <button
+                  onClick={() => handleShareWhatsApp(activeReceiptForSlip)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  title="Open WhatsApp Web to send this receipt invoice"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Send to WhatsApp Web</span>
                 </button>
                 <button
                   onClick={() => window.print()}

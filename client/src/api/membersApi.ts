@@ -57,6 +57,8 @@ export interface SaveMemberInput {
   recordPaymentNow: boolean;
   paymentDetails?: {
     amount: number;
+    taxAmount?: number;
+    total?: number;
     paymentMode: 'UPI' | 'Card' | 'Bank Transfer' | 'Cash';
     paymentDate: string;
     referenceNo?: string;
@@ -85,6 +87,8 @@ export interface PendingRegistrationRecord {
   paymentIncluded: boolean;
   paymentDetails?: {
     amount: number;
+    taxAmount?: number;
+    total?: number;
     paymentMode: 'UPI' | 'Card' | 'Bank Transfer' | 'Cash';
     paymentDate: string;
     referenceNo?: string;
@@ -255,6 +259,8 @@ export const createMemberAtomic = async (
 
       if (input.recordPaymentNow && input.paymentDetails) {
         const baseAmount = Number(input.paymentDetails.amount) || 0;
+        const taxAmount = input.paymentDetails.taxAmount !== undefined ? Number(input.paymentDetails.taxAmount) : 0;
+        const totalAmount = input.paymentDetails.total !== undefined ? Number(input.paymentDetails.total) : baseAmount + taxAmount;
         createdReceipt = {
           id: `rec-${liveMember.id}`,
           receiptNo: `RC-${liveMember.memberId || liveMember.id}`,
@@ -263,8 +269,8 @@ export const createMemberAtomic = async (
           memberPhone: liveMember.phone,
           plan: liveMember.planName,
           amount: baseAmount,
-          tax: 0,
-          total: baseAmount,
+          tax: taxAmount,
+          total: totalAmount,
           paymentDate: input.paymentDetails.paymentDate || new Date().toISOString().split('T')[0],
           paymentMode: input.paymentDetails.paymentMode || 'UPI',
           referenceNo: input.paymentDetails.referenceNo || `TXN_${Date.now().toString().slice(-6)}`,
@@ -343,8 +349,12 @@ export const createMemberAtomic = async (
     // 4. If payment toggle is ON: Create receipts record
     if (input.recordPaymentNow && input.paymentDetails) {
       const baseAmount = Number(input.paymentDetails.amount) || 0;
-      const tax = Math.round(baseAmount * 0.18);
-      const total = baseAmount + tax;
+      const tax = input.paymentDetails.taxAmount !== undefined
+        ? Number(input.paymentDetails.taxAmount)
+        : Math.round(baseAmount * 0.18);
+      const total = input.paymentDetails.total !== undefined
+        ? Number(input.paymentDetails.total)
+        : baseAmount + tax;
       const receiptNo = `REC-2024-${String(Date.now()).slice(-4)}`;
 
       createdReceipt = {

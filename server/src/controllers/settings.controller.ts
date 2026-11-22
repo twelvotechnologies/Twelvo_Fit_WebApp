@@ -164,4 +164,26 @@ export class SettingsController {
       next(err);
     }
   }
+
+  // --- Gym Configuration ---
+
+  static async getConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tenantId = SettingsController.getTenantId(req);
+      const data = await SettingsService.getConfig(tenantId);
+      res.status(200).json(ApiResponse.success(data, 'Configuration retrieved successfully'));
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async updateConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tenantId = SettingsController.getTenantId(req);
+      const data = await SettingsService.updateConfig(req.body, tenantId);
+      res.status(200).json(ApiResponse.success(data, 'Configuration updated successfully'));
+    } catch (err) {
+      next(err);
+    }
+  }
 }

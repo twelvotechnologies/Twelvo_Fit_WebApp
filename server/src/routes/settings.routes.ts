@@ -36,4 +36,8 @@ router.put('/expense-types/:id', ExpensesController.updateExpenseType);
 router.patch('/expense-types/:id/toggle', ExpensesController.toggleExpenseTypeStatus);
 router.delete('/expense-types/:id', ExpensesController.deleteExpenseType);
 
+// System Configuration Endpoints
+router.get('/config', SettingsController.getConfig);
+router.put('/config', SettingsController.updateConfig);
+
 export default router;

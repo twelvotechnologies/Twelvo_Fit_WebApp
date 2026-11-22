@@ -3,8 +3,19 @@ import {
   BankAccountItem,
   PlanTypeItem,
   DurationUnit,
+  GymConfigSettings,
 } from './types';
 import { fetchWithAuth, API_BASE } from './authFetch';
+
+export const DEFAULT_GYM_CONFIG: GymConfigSettings = {
+  gstEnabled: true,
+  defaultGstRate: 18,
+  gstin: '27AABCP1234F1Z8',
+  taxCalculationType: 'EXCLUSIVE',
+  businessLegalName: 'Twelvo Gym & Fitness Pvt Ltd',
+  invoicePrefix: 'REC',
+  panNumber: 'AABCP1234F',
+};
 
 // Default fallback mock initializations for tenant
 const DEFAULT_PAYMENT_TYPES: PaymentTypeItem[] = [
@@ -38,6 +49,9 @@ const DEFAULT_PLAN_TYPES: PlanTypeItem[] = [
     durationUnit: 'Months',
     displayDuration: '1 Month',
     standardFee: 2500,
+    hasGst: true,
+    gstRate: 18,
+    totalWithGst: 2950,
     isActive: true,
   },
   {
@@ -48,6 +62,9 @@ const DEFAULT_PLAN_TYPES: PlanTypeItem[] = [
     durationUnit: 'Months',
     displayDuration: '3 Months',
     standardFee: 6500,
+    hasGst: true,
+    gstRate: 18,
+    totalWithGst: 7670,
     isActive: true,
   },
   {
@@ -58,6 +75,9 @@ const DEFAULT_PLAN_TYPES: PlanTypeItem[] = [
     durationUnit: 'Years',
     displayDuration: '1 Year',
     standardFee: 22000,
+    hasGst: true,
+    gstRate: 18,
+    totalWithGst: 25960,
     isActive: true,
   },
   {
@@ -68,6 +88,9 @@ const DEFAULT_PLAN_TYPES: PlanTypeItem[] = [
     durationUnit: 'One-time',
     displayDuration: 'One-time',
     standardFee: 1000,
+    hasGst: false,
+    gstRate: 0,
+    totalWithGst: 1000,
     isActive: true,
   },
 ];
@@ -91,6 +114,49 @@ const setStored = <T>(key: string, data: T) => {
 let paymentTypes: PaymentTypeItem[] = getStored('payment_types', DEFAULT_PAYMENT_TYPES);
 let bankAccounts: BankAccountItem[] = getStored('bank_accounts', DEFAULT_BANK_ACCOUNTS);
 let planTypes: PlanTypeItem[] = getStored('plan_types', DEFAULT_PLAN_TYPES);
+let gymConfig: GymConfigSettings = getStored('gym_config', DEFAULT_GYM_CONFIG);
+
+export const getGymConfiguration = async (): Promise<GymConfigSettings> => {
+  try {
+    const res = await fetchWithAuth(`${API_BASE}/v1/settings/config`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) {
+        gymConfig = { ...DEFAULT_GYM_CONFIG, ...json.data };
+        setStored('gym_config', gymConfig);
+        return gymConfig;
+      }
+    }
+  } catch {
+    // Fallback
+  }
+  return gymConfig;
+};
+
+export const updateGymConfiguration = async (
+  input: Partial<GymConfigSettings>
+): Promise<GymConfigSettings> => {
+  try {
+    const res = await fetchWithAuth(`${API_BASE}/v1/settings/config`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) {
+        gymConfig = { ...gymConfig, ...json.data };
+        setStored('gym_config', gymConfig);
+        return gymConfig;
+      }
+    }
+  } catch {
+    // Fallback
+  }
+
+  gymConfig = { ...gymConfig, ...input };
+  setStored('gym_config', gymConfig);
+  return gymConfig;
+};
 
 const computeDisplayDuration = (val: number, unit: DurationUnit): string => {
   if (unit === 'One-time') return 'One-time';
@@ -408,6 +474,8 @@ export interface CreatePlanTypeInput {
   durationValue: number;
   durationUnit: DurationUnit;
   standardFee?: number;
+  hasGst?: boolean;
+  gstRate?: number;
 }
 
 export const addPlanType = async (input: CreatePlanTypeInput): Promise<PlanTypeItem> => {
@@ -428,6 +496,11 @@ export const addPlanType = async (input: CreatePlanTypeInput): Promise<PlanTypeI
     // Fallback
   }
 
+  const hasGst = input.hasGst !== undefined ? input.hasGst : true;
+  const gstRate = hasGst ? (input.gstRate !== undefined ? input.gstRate : 18) : 0;
+  const standardFee = Number(input.standardFee) || 2000;
+  const totalWithGst = hasGst ? standardFee + Math.round(standardFee * (gstRate / 100)) : standardFee;
+
   const newPlan: PlanTypeItem = {
     id: `fee-${Date.now()}`,
     name: input.name.trim(),
@@ -438,7 +511,10 @@ export const addPlanType = async (input: CreatePlanTypeInput): Promise<PlanTypeI
       input.durationUnit === 'One-time' ? 0 : Number(input.durationValue) || 1,
       input.durationUnit
     ),
-    standardFee: Number(input.standardFee) || 2000,
+    standardFee,
+    hasGst,
+    gstRate,
+    totalWithGst,
     isActive: true,
   };
 
@@ -477,6 +553,10 @@ export const updatePlanType = async (
   item.durationValue = input.durationUnit === 'One-time' ? 0 : Number(input.durationValue) || 1;
   item.displayDuration = computeDisplayDuration(item.durationValue, item.durationUnit);
   if (input.standardFee !== undefined) item.standardFee = Number(input.standardFee);
+  if (input.hasGst !== undefined) item.hasGst = input.hasGst;
+  if (input.gstRate !== undefined) item.gstRate = input.gstRate;
+  const effectiveRate = item.hasGst ? (item.gstRate !== undefined ? item.gstRate : 18) : 0;
+  item.totalWithGst = item.hasGst ? item.standardFee + Math.round(item.standardFee * (effectiveRate / 100)) : item.standardFee;
 
   setStored('plan_types', planTypes);
   return item;
